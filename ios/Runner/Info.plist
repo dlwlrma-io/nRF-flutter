@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>We need Bluetooth to discover, connect and share information with other nearby devices.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>We need Bluetooth to discover, connect and share information with other nearby devices.</string>
 </dict>
 </plist>
