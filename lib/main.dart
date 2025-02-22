@@ -103,13 +103,14 @@ class _IntroScreenState extends State<IntroScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            SizedBox(height: 80),
             Icon(Icons.bluetooth, size: 100, color: Colors.blue),
             SizedBox(height: 16),
             Text("find and connect to a smart ring", style: TextStyle(fontSize: 12)),
             SizedBox(height: 32),
             ElevatedButton(
               onPressed: startScan,
-              child: Text(isScanning ? "Scanning..." : "Scan for Devices"),
+              child: Text(isScanning ? "Finding..." : "Find for Devices"),
             ),
             SizedBox(height: 16),
             isScanning || isScanFinished
@@ -120,6 +121,7 @@ class _IntroScreenState extends State<IntroScreen> {
                                 ? CircularProgressIndicator()
                                 : Text("No devices found"))
                         : ListView.builder(
+                            shrinkWrap: true,
                             itemCount: devicesList.length,
                             itemBuilder: (context, index) {
                               var device = devicesList[index];
@@ -140,6 +142,7 @@ class _IntroScreenState extends State<IntroScreen> {
                           ),
                   )
                 : Container(),
+              SizedBox(height: 80),
           ],
         ),
       ),
@@ -171,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late QualifiedCharacteristic axisXCharacteristic;
   late QualifiedCharacteristic axisYCharacteristic;
   late QualifiedCharacteristic axisZCharacteristic;
-  late QualifiedCharacteristic heartRateCharacteristic; // For Heart Rate
+  late QualifiedCharacteristic heartRateCharacteristic;
   
   // Stream subscriptions for notifications
   StreamSubscription? _connectionStream;
@@ -179,8 +182,10 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _axisXSubscription;
   StreamSubscription? _axisYSubscription;
   StreamSubscription? _axisZSubscription;
-  StreamSubscription? _heartRateSubscription;  // Subscription for Heart Rate
-
+  StreamSubscription? _heartRateSubscription;
+ 
+  DeviceConnectionState _deviceState = DeviceConnectionState.disconnected;
+ 
   @override
   void initState() {
     super.initState();
@@ -194,6 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ).listen(
       (connectionState) {
         if (connectionState.connectionState == DeviceConnectionState.connected) {
+          _deviceState = connectionState.connectionState;
           _startNotifications();
         }
         print('Connection state: $connectionState');
@@ -336,6 +342,17 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Spacer(flex: 1),
+              IconButton(
+                icon: Icon(Icons.bluetooth, color: _deviceState == DeviceConnectionState.connected ? Colors.blue : Colors.grey),
+                onPressed: _disconnectAndReturn,
+              ),
+            ],
+          ),
           buildCard("BLE", [
             buildText("name", widget.deviceName.isEmpty ? "Unknown Device" : widget.deviceName),
             SizedBox(height: 8),
@@ -423,7 +440,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(title, style: TextStyle(fontSize: 16, color: Colors.black54)),
           Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ],
-      ),
+      ),  
     ],
   );
 
@@ -438,4 +455,12 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }),
   );
+
+  void _disconnectAndReturn() async {
+    await _connectionStream?.cancel();  // BLE 연결 해제
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => IntroScreen()), 
+      (Route<dynamic> route) => false,
+    );
+  }
 }
