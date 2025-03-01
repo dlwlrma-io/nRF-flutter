@@ -358,17 +358,20 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(height: 8),
             buildText("mac address", widget.deviceId),
             SizedBox(height: 8),
-            buildText("firmware version", "1.0.0"),
+            buildText("firmware version", "v1.0.0"),
           ]),
           buildCard("PPG", [
             buildTextWithIcon("HRM", heartRate, Icons.favorite),
             SizedBox(height: 8),
             buildTextWithIcon("SpO2", spo2, Icons.bloodtype),
             SizedBox(height: 8),
-            buildTextWithIcon("R-R", "0", Icons.air),
+            buildTextWithIcon("R-R", "-", Icons.air),
           ]),
           buildCard("ACC (Gyro)", [
             buildAxisRow(["X axis", "Y axis", "Z axis"], [axisX, axisY, axisZ]),
+          ]),
+          buildCard("ACC (Tap)", [
+            buildAxisRow(["Single", "Double", "Drop"], ["0", "0", "0"]),
           ]),
           buildCard("Wearable Algorithm Suite", [
             buildText("SDNN", "not supported this version."),
