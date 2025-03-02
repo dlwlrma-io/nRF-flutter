@@ -1,21 +1,30 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:mcumgr_flutter/mcumgr_flutter.dart';
+import 'package:mcumgr_flutter/models/image_upload_alignment.dart';
+import 'package:mcumgr_flutter/models/firmware_upgrade_mode.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() => runApp(MyApp());
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'nRF54L15',
-    theme: ThemeData(primarySwatch: Colors.blue),
-    home: IntroScreen(),
-  );
+        title: 'nRF54L15',
+        theme: ThemeData(primarySwatch: Colors.blue),
+        home: IntroScreen(),
+      );
 }
 
 class IntroScreen extends StatefulWidget {
+  const IntroScreen({super.key});
+
   @override
   _IntroScreenState createState() => _IntroScreenState();
 }
@@ -36,6 +45,7 @@ class _IntroScreenState extends State<IntroScreen> {
     await Permission.bluetoothScan.request();
     await Permission.bluetoothConnect.request();
     await Permission.location.request();
+    await Permission.storage.request();
   }
 
   void startScan() {
@@ -78,17 +88,18 @@ class _IntroScreenState extends State<IntroScreen> {
   void connectToDevice(DiscoveredDevice device) async {
     setState(() => isConnected = false);
     try {
-      await _ble.connectToDevice(
-        id: device.id,
-        connectionTimeout: const Duration(seconds: 5),
-      ).first;
+      await _ble
+          .connectToDevice(
+            id: device.id,
+            connectionTimeout: const Duration(seconds: 5),
+          )
+          .first;
       setState(() => isConnected = true);
       Navigator.push(
-        context, 
-        MaterialPageRoute(
-          builder: (context) => HomeScreen(deviceId: device.id, deviceName: device.name)
-        )
-      );
+          context,
+          MaterialPageRoute(
+              builder: (context) =>
+                  HomeScreen(deviceId: device.id, deviceName: device.name)));
     } catch (e) {
       print('Connection error: $e');
       setState(() => isConnected = false);
@@ -97,85 +108,94 @@ class _IntroScreenState extends State<IntroScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(height: 80),
-            Icon(Icons.bluetooth, size: 100, color: Colors.blue),
-            SizedBox(height: 16),
-            Text("find and connect to a smart ring", style: TextStyle(fontSize: 12)),
-            SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: startScan,
-              child: Text(isScanning ? "Finding..." : "Find for Devices"),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(height: 80),
+                Icon(Icons.bluetooth, size: 100, color: Colors.blue),
+                SizedBox(height: 16),
+                Text("find and connect to a smart ring",
+                    style: TextStyle(fontSize: 12)),
+                SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: startScan,
+                  child: Text(isScanning ? "Finding..." : "Find for Devices"),
+                ),
+                SizedBox(height: 16),
+                isScanning || isScanFinished
+                    ? Expanded(
+                        child: devicesList.isEmpty
+                            ? Center(
+                                child: isScanning
+                                    ? CircularProgressIndicator()
+                                    : Text("No devices found"))
+                            : ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: devicesList.length,
+                                itemBuilder: (context, index) {
+                                  var device = devicesList[index];
+                                  return Card(
+                                    margin:
+                                        const EdgeInsets.symmetric(vertical: 8),
+                                    child: ListTile(
+                                      title: Text(device.name.isEmpty
+                                          ? "Unknown Device"
+                                          : device.name),
+                                      subtitle: Text(device.id),
+                                      trailing: ElevatedButton(
+                                        onPressed: () =>
+                                            connectToDevice(device),
+                                        child: Text("Connect"),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      )
+                    : Container(),
+                SizedBox(height: 80),
+              ],
             ),
-            SizedBox(height: 16),
-            isScanning || isScanFinished
-                ? Expanded(
-                    child: devicesList.isEmpty
-                        ? Center(
-                            child: isScanning
-                                ? CircularProgressIndicator()
-                                : Text("No devices found"))
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: devicesList.length,
-                            itemBuilder: (context, index) {
-                              var device = devicesList[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(vertical: 8),
-                                child: ListTile(
-                                  title: Text(device.name.isEmpty 
-                                    ? "Unknown Device" 
-                                    : device.name),
-                                  subtitle: Text(device.id),
-                                  trailing: ElevatedButton(
-                                    onPressed: () => connectToDevice(device),
-                                    child: Text("Connect"),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  )
-                : Container(),
-              SizedBox(height: 80),
-          ],
+          ),
         ),
-      ),
-    ),
-  );
+      );
 }
 
 class HomeScreen extends StatefulWidget {
   final String deviceId;
   final String deviceName;
 
-  HomeScreen({required this.deviceId, required this.deviceName});
+  const HomeScreen(
+      {super.key, required this.deviceId, required this.deviceName});
 
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String heartRate = "0";  // Default value for heart rate
-  String spo2 = "0";       // Default value for SpO2
-  String axisX = "0";      // Default value for axis X
-  String axisY = "0";      // Default value for axis Y
-  String axisZ = "0";      // Default value for axis Z
+  String heartRate = "0";
+  String spo2 = "0";
+  String axisX = "0";
+  String axisY = "0";
+  String axisZ = "0";
+  String firmwareVersion = "v1.0.0";
 
   final _ble = FlutterReactiveBle();
-  
+
+  bool isUpdatingFirmware = false;
+  double updateProgress = 0.0;
+  String updateStatus = "";
+
   // Define the UUIDs for the characteristics
   late QualifiedCharacteristic spo2Characteristic;
   late QualifiedCharacteristic axisXCharacteristic;
   late QualifiedCharacteristic axisYCharacteristic;
   late QualifiedCharacteristic axisZCharacteristic;
   late QualifiedCharacteristic heartRateCharacteristic;
-  
+
   // Stream subscriptions for notifications
   StreamSubscription? _connectionStream;
   StreamSubscription? _spo2Subscription;
@@ -183,9 +203,10 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _axisYSubscription;
   StreamSubscription? _axisZSubscription;
   StreamSubscription? _heartRateSubscription;
- 
+  StreamSubscription? _updateProgressSubscription;
+
   DeviceConnectionState _deviceState = DeviceConnectionState.disconnected;
- 
+
   @override
   void initState() {
     super.initState();
@@ -193,16 +214,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _maintainConnection() async {
-    _connectionStream = _ble.connectToDevice(
+    _connectionStream = _ble
+        .connectToDevice(
       id: widget.deviceId,
       connectionTimeout: const Duration(seconds: 5),
-    ).listen(
+    )
+        .listen(
       (connectionState) {
-        if (connectionState.connectionState == DeviceConnectionState.connected) {
+        if (connectionState.connectionState ==
+            DeviceConnectionState.connected) {
           _deviceState = connectionState.connectionState;
           _startNotifications();
+        } else {
+          _deviceState = connectionState.connectionState;
         }
-        print('Connection state: $connectionState');
+        setState(() {}); // Update UI based on connection state
+        print('Connection state: ${connectionState.connectionState}');
       },
       onError: (Object error) {
         print('Connection error: $error');
@@ -224,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
       serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
       deviceId: widget.deviceId,
     );
-    
+
     axisXCharacteristic = QualifiedCharacteristic(
       characteristicId: axisXUuid,
       serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
@@ -236,7 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
       serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
       deviceId: widget.deviceId,
     );
-    
+
     axisZCharacteristic = QualifiedCharacteristic(
       characteristicId: axisZUuid,
       serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
@@ -250,7 +277,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     // Subscribe to Heart Rate characteristic notifications
-    _heartRateSubscription = _ble.subscribeToCharacteristic(heartRateCharacteristic).listen(
+    _heartRateSubscription =
+        _ble.subscribeToCharacteristic(heartRateCharacteristic).listen(
       (data) {
         setState(() => heartRate = "${_parseHeartRate(data)} bpm");
       },
@@ -260,7 +288,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     // Subscribe to notifications for each characteristic
-    _spo2Subscription = _ble.subscribeToCharacteristic(spo2Characteristic).listen(
+    _spo2Subscription =
+        _ble.subscribeToCharacteristic(spo2Characteristic).listen(
       (data) {
         setState(() => spo2 = "${_parseSingleByteInt(data)}%");
       },
@@ -269,7 +298,8 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    _axisXSubscription = _ble.subscribeToCharacteristic(axisXCharacteristic).listen(
+    _axisXSubscription =
+        _ble.subscribeToCharacteristic(axisXCharacteristic).listen(
       (data) {
         setState(() => axisX = _parseSignedInt16(data));
       },
@@ -278,7 +308,8 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    _axisYSubscription = _ble.subscribeToCharacteristic(axisYCharacteristic).listen(
+    _axisYSubscription =
+        _ble.subscribeToCharacteristic(axisYCharacteristic).listen(
       (data) {
         setState(() => axisY = _parseSignedInt16(data));
       },
@@ -287,7 +318,8 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    _axisZSubscription = _ble.subscribeToCharacteristic(axisZCharacteristic).listen(
+    _axisZSubscription =
+        _ble.subscribeToCharacteristic(axisZCharacteristic).listen(
       (data) {
         setState(() => axisZ = _parseSignedInt16(data));
       },
@@ -295,6 +327,69 @@ class _HomeScreenState extends State<HomeScreen> {
         print('Error subscribing to axis Z characteristic: $e');
       },
     );
+  }
+
+  Future<void> _performFirmwareUpdate() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['bin'],
+      );
+
+      if (result != null) {
+        File file = File(result.files.single.path!);
+        Uint8List imageData = await file.readAsBytes();
+
+        // https://github.com/NordicSemiconductor/Flutter-nRF-Connect-Device-Manager?tab=readme-ov-file
+        // must be select xxxx.sign.bin file after unzip dfu_application.zip!
+        final managerFactory = FirmwareUpdateManagerFactory();
+        // `deviceId` is a String with the device's MAC address (on Android) or UUID (on iOS)
+        final updateManager = await managerFactory.getUpdateManager(widget.deviceId);
+        // call `setup` before using the manager
+        final updateStream = updateManager.setup();
+
+        updateManager.updateStateStream?.listen(
+          (event) {
+            if (event == FirmwareUpgradeState.success) {
+              print("Update Success");
+            } else {
+              print(event);
+            }
+          },
+          onDone: () async => {
+            await updateManager.kill(),
+          },
+          onError: (error) async => {
+            await updateManager.kill(),
+          },
+        );
+
+        updateManager.progressStream.listen((event) {
+          print("${event.bytesSent} / ${event.imageSize}} bytes sent");
+        });
+
+        updateManager.logger.logMessageStream
+            .listen((log) {
+          print(log.message);
+        });
+
+        final configuration = const FirmwareUpgradeConfiguration(
+          estimatedSwapTime: Duration(seconds: 30),
+          byteAlignment: ImageUploadAlignment.fourByte,
+          eraseAppSettings: true,
+          pipelineDepth: 1,
+          firmwareUpgradeMode: FirmwareUpgradeMode.uploadOnly,
+        );
+
+        await updateManager.updateWithImageData(
+            imageData: imageData, configuration: configuration);
+      }
+    } catch (e) {
+      setState(() {
+        isUpdatingFirmware = false;
+        updateStatus = "Update failed: $e";
+      });
+    }
   }
 
   String _parseHeartRate(List<int> data) {
@@ -321,7 +416,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _parseSignedInt16(List<int> data) {
     if (data.length < 2) return "0";
-    return ByteData.sublistView(Uint8List.fromList(data)).getInt16(0, Endian.little).toString();
+    return ByteData.sublistView(Uint8List.fromList(data))
+        .getInt16(0, Endian.little)
+        .toString();
   }
 
   @override
@@ -331,138 +428,185 @@ class _HomeScreenState extends State<HomeScreen> {
     _axisXSubscription?.cancel();
     _axisYSubscription?.cancel();
     _axisZSubscription?.cancel();
-    _heartRateSubscription?.cancel();  // Cancel Heart Rate subscription
+    _heartRateSubscription?.cancel();
+    _updateProgressSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Spacer(flex: 1),
-              IconButton(
-                icon: Icon(Icons.bluetooth, color: _deviceState == DeviceConnectionState.connected ? Colors.blue : Colors.grey),
-                onPressed: _disconnectAndReturn,
+              SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Spacer(flex: 1),
+                  IconButton(
+                    icon: Icon(Icons.bluetooth,
+                        color: _deviceState == DeviceConnectionState.connected
+                            ? Colors.blue
+                            : Colors.grey),
+                    onPressed: _disconnectAndReturn,
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.system_update,
+                        color: _deviceState == DeviceConnectionState.connected
+                            ? Colors.blue
+                            : Colors.grey),
+                    onPressed:
+                        isUpdatingFirmware ? null : _performFirmwareUpdate,
+                  ),
+                ],
               ),
+              // Show update progress if updating
+              if (isUpdatingFirmware) ...[
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Firmware Update",
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 16),
+                        Text(updateStatus),
+                        SizedBox(height: 8),
+                        LinearProgressIndicator(value: updateProgress),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              buildCard("BLE", [
+                buildText(
+                    "name",
+                    widget.deviceName.isEmpty
+                        ? "Unknown Device"
+                        : widget.deviceName),
+                SizedBox(height: 8),
+                buildText("mac address", widget.deviceId),
+                SizedBox(height: 8),
+                buildText("firmware version", firmwareVersion),
+              ]),
+              buildCard("PPG", [
+                buildTextWithIcon("HRM", heartRate, Icons.favorite),
+                SizedBox(height: 8),
+                buildTextWithIcon("SpO2", spo2, Icons.bloodtype),
+                SizedBox(height: 8),
+                buildTextWithIcon("R-R", "-", Icons.air),
+              ]),
+              buildCard("ACC (Gyro)", [
+                buildAxisRow(
+                    ["X axis", "Y axis", "Z axis"], [axisX, axisY, axisZ]),
+              ]),
+              buildCard("ACC (Tap)", [
+                buildAxisRow(["Single", "Double", "Drop"], ["0", "0", "0"]),
+              ]),
+              buildCard("Wearable Algorithm Suite", [
+                buildText("SDNN", "not supported this version."),
+                SizedBox(height: 8),
+                buildText("RDMII", "not supported this version."),
+                SizedBox(height: 8),
+                buildText("Stress", "not supported this version."),
+                SizedBox(height: 8),
+                buildText("Sleep Quality", "not supported this version."),
+              ]),
             ],
           ),
-          buildCard("BLE", [
-            buildText("name", widget.deviceName.isEmpty ? "Unknown Device" : widget.deviceName),
-            SizedBox(height: 8),
-            buildText("mac address", widget.deviceId),
-            SizedBox(height: 8),
-            buildText("firmware version", "v1.0.0"),
-          ]),
-          buildCard("PPG", [
-            buildTextWithIcon("HRM", heartRate, Icons.favorite),
-            SizedBox(height: 8),
-            buildTextWithIcon("SpO2", spo2, Icons.bloodtype),
-            SizedBox(height: 8),
-            buildTextWithIcon("R-R", "-", Icons.air),
-          ]),
-          buildCard("ACC (Gyro)", [
-            buildAxisRow(["X axis", "Y axis", "Z axis"], [axisX, axisY, axisZ]),
-          ]),
-          buildCard("ACC (Tap)", [
-            buildAxisRow(["Single", "Double", "Drop"], ["0", "0", "0"]),
-          ]),
-          buildCard("Wearable Algorithm Suite", [
-            buildText("SDNN", "not supported this version."),
-            SizedBox(height: 8),
-            buildText("RDMII", "not supported this version."),
-            SizedBox(height: 8),
-            buildText("Stress", "not supported this version."),
-            SizedBox(height: 8),
-            buildText("Sleep Quality", "not supported this version."),
-          ]),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 
   Widget buildCard(String title, List<Widget> children) => Card(
-    margin: const EdgeInsets.symmetric(vertical: 10),
-    elevation: 4,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Spacer(),
-              IconButton(icon: Icon(Icons.settings, color: Colors.black), onPressed: () {}),
+              Row(
+                children: [
+                  Text(title,
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Spacer(),
+                  IconButton(
+                      icon: Icon(Icons.settings, color: Colors.black),
+                      onPressed: () {}),
+                ],
+              ),
+              SizedBox(height: 16),
+              ...children,
             ],
           ),
-          SizedBox(height: 16),
-          ...children,
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 
   Widget buildText(String title, String value) => Row(
-    children: [
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(fontSize: 16, color: Colors.black54)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: TextStyle(fontSize: 16, color: Colors.black54)),
+              Text(value,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ],
           ),
-          Text(
-            value,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis
-          ),
-        ],
-      ),
-      Spacer(),
-    ],
-  );
-
-  Widget buildTextWithIcon(String title, String value, IconData icon) => Row(
-    children: [
-      Icon(icon, size: 40, color: Colors.red),
-      SizedBox(width: 20),
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: TextStyle(fontSize: 16, color: Colors.black54)),
-          Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ],
-      ),  
-    ],
-  );
-
-  Widget buildAxisRow(List<String> axes, List<String> values) => Row(
-    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    children: List.generate(axes.length, (i) {
-      return Column(
-        children: [
-          Text(axes[i], style: TextStyle(fontSize: 16, color: Colors.black54)),
-          Text(values[i], style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Spacer(),
         ],
       );
-    }),
-  );
+
+  Widget buildTextWithIcon(String title, String value, IconData icon) => Row(
+        children: [
+          Icon(icon, size: 40, color: Colors.red),
+          SizedBox(width: 20),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: TextStyle(fontSize: 16, color: Colors.black54)),
+              Text(value,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ],
+      );
+
+  Widget buildAxisRow(List<String> axes, List<String> values) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: List.generate(axes.length, (i) {
+          return Column(
+            children: [
+              Text(axes[i],
+                  style: TextStyle(fontSize: 16, color: Colors.black54)),
+              Text(values[i],
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          );
+        }),
+      );
 
   void _disconnectAndReturn() async {
-    await _connectionStream?.cancel();  // BLE 연결 해제
+    await _connectionStream?.cancel();
+
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => IntroScreen()), 
+      MaterialPageRoute(builder: (context) => IntroScreen()),
       (Route<dynamic> route) => false,
     );
   }
