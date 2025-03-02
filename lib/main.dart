@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:mcumgr_flutter/mcumgr_flutter.dart';
@@ -9,7 +10,30 @@ import 'package:mcumgr_flutter/models/image_upload_alignment.dart';
 import 'package:mcumgr_flutter/models/firmware_upgrade_mode.dart';
 import 'package:file_picker/file_picker.dart';
 
-void main() => runApp(MyApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations(
+    [
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ],
+  );
+
+  runApp(const MyApp());
+}
+
+// BLE UUIDs
+class BleUuids {
+  static final serviceId = Uuid.parse('00001000-0000-1000-8000-00805f9b34fb');
+  static final heartRateServiceId =
+      Uuid.parse('0000180D-0000-1000-8000-00805f9b34fb');
+  static final heartRateUuid =
+      Uuid.parse('00002a37-0000-1000-8000-00805f9b34fb');
+  static final spo2Uuid = Uuid.parse('00001002-0000-1000-8000-00805f9b34fb');
+  static final axisXUuid = Uuid.parse('00001003-0000-1000-8000-00805f9b34fb');
+  static final axisYUuid = Uuid.parse('00001004-0000-1000-8000-00805f9b34fb');
+  static final axisZUuid = Uuid.parse('00001005-0000-1000-8000-00805f9b34fb');
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -18,21 +42,22 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'nRF54L15',
         theme: ThemeData(primarySwatch: Colors.blue),
-        home: IntroScreen(),
+        home: const IntroScreen(),
       );
 }
 
 class IntroScreen extends StatefulWidget {
   const IntroScreen({super.key});
-
   @override
   _IntroScreenState createState() => _IntroScreenState();
 }
 
 class _IntroScreenState extends State<IntroScreen> {
   final _ble = FlutterReactiveBle();
-  bool isScanning = false, isScanFinished = false, isConnected = false;
-  List<DiscoveredDevice> devicesList = [];
+  bool _isScanning = false;
+  bool _isScanFinished = false;
+  bool _isConnected = false;
+  final List<DiscoveredDevice> _devicesList = [];
 
   @override
   void initState() {
@@ -41,52 +66,57 @@ class _IntroScreenState extends State<IntroScreen> {
   }
 
   Future<void> _requestPermissions() async {
-    await Permission.bluetooth.request();
-    await Permission.bluetoothScan.request();
-    await Permission.bluetoothConnect.request();
-    await Permission.location.request();
-    await Permission.storage.request();
+    await Future.wait([
+      Permission.bluetooth.request(),
+      Permission.bluetoothScan.request(),
+      Permission.bluetoothConnect.request(),
+      Permission.location.request(),
+      Permission.storage.request(),
+    ]);
   }
 
-  void startScan() {
-    if (!isScanning) {
-      setState(() {
-        isScanning = true;
-        isScanFinished = false;
-        devicesList.clear();
-      });
+  void _startScan() {
+    if (_isScanning) return;
 
-      _ble.scanForDevices(
-        withServices: [],
-        scanMode: ScanMode.lowLatency,
-      ).listen((device) {
-        final deviceIndex = devicesList.indexWhere((d) => d.id == device.id);
-        setState(() {
-          if (deviceIndex >= 0) {
-            devicesList[deviceIndex] = device;
-          } else {
-            devicesList.add(device);
-          }
-        });
-      }, onError: (Object error) {
-        print('BLE scan error: $error');
-        setState(() {
-          isScanning = false;
-          isScanFinished = true;
-        });
-      });
+    setState(() {
+      _isScanning = true;
+      _isScanFinished = false;
+      _devicesList.clear();
+    });
 
-      Future.delayed(Duration(seconds: 5), () {
+    _ble.scanForDevices(
+      withServices: [],
+      scanMode: ScanMode.lowLatency,
+    ).listen(
+      (device) {
+        final deviceIndex = _devicesList.indexWhere((d) => d.id == device.id);
         setState(() {
-          isScanning = false;
-          isScanFinished = true;
+          deviceIndex >= 0
+              ? _devicesList[deviceIndex] = device
+              : _devicesList.add(device);
         });
-      });
-    }
+      },
+      onError: (error) {
+        debugPrint('BLE scan error: $error');
+        setState(() {
+          _isScanning = false;
+          _isScanFinished = true;
+        });
+      },
+    );
+
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+          _isScanFinished = true;
+        });
+      }
+    });
   }
 
-  void connectToDevice(DiscoveredDevice device) async {
-    setState(() => isConnected = false);
+  void _connectToDevice(DiscoveredDevice device) async {
+    setState(() => _isConnected = false);
     try {
       await _ble
           .connectToDevice(
@@ -94,15 +124,24 @@ class _IntroScreenState extends State<IntroScreen> {
             connectionTimeout: const Duration(seconds: 5),
           )
           .first;
-      setState(() => isConnected = true);
-      Navigator.push(
+
+      if (mounted) {
+        setState(() => _isConnected = true);
+        Navigator.push(
           context,
           MaterialPageRoute(
-              builder: (context) =>
-                  HomeScreen(deviceId: device.id, deviceName: device.name)));
+            builder: (context) => HomeScreen(
+              deviceId: device.id,
+              deviceName: device.name,
+            ),
+          ),
+        );
+      }
     } catch (e) {
-      print('Connection error: $e');
-      setState(() => isConnected = false);
+      debugPrint('Connection error: $e');
+      if (mounted) {
+        setState(() => _isConnected = false);
+      }
     }
   }
 
@@ -114,51 +153,61 @@ class _IntroScreenState extends State<IntroScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                SizedBox(height: 80),
-                Icon(Icons.bluetooth, size: 100, color: Colors.blue),
-                SizedBox(height: 16),
-                Text("find and connect to a smart ring",
+                const SizedBox(height: 80),
+                const Icon(Icons.bluetooth, size: 100, color: Colors.blue),
+                const SizedBox(height: 16),
+                const Text("find and connect to a smart ring",
                     style: TextStyle(fontSize: 12)),
-                SizedBox(height: 32),
+                const SizedBox(height: 32),
                 ElevatedButton(
-                  onPressed: startScan,
-                  child: Text(isScanning ? "Finding..." : "Find for Devices"),
+                  onPressed: _startScan,
+                  child: Text(_isScanning ? "Finding..." : "Find Devices"),
                 ),
-                SizedBox(height: 16),
-                isScanning || isScanFinished
-                    ? Expanded(
-                        child: devicesList.isEmpty
-                            ? Center(
-                                child: isScanning
-                                    ? CircularProgressIndicator()
-                                    : Text("No devices found"))
-                            : ListView.builder(
-                                shrinkWrap: true,
-                                itemCount: devicesList.length,
-                                itemBuilder: (context, index) {
-                                  var device = devicesList[index];
-                                  return Card(
-                                    margin:
-                                        const EdgeInsets.symmetric(vertical: 8),
-                                    child: ListTile(
-                                      title: Text(device.name.isEmpty
-                                          ? "Unknown Device"
-                                          : device.name),
-                                      subtitle: Text(device.id),
-                                      trailing: ElevatedButton(
-                                        onPressed: () =>
-                                            connectToDevice(device),
-                                        child: Text("Connect"),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      )
-                    : Container(),
-                SizedBox(height: 80),
+                const SizedBox(height: 16),
+                if (_isScanning || _isScanFinished)
+                  Expanded(
+                    child: _devicesList.isEmpty
+                        ? Center(
+                            child: _isScanning
+                                ? const CircularProgressIndicator()
+                                : const Text("No devices found"),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _devicesList.length,
+                            itemBuilder: (_, index) => _DeviceListItem(
+                              device: _devicesList[index],
+                              onConnect: () =>
+                                  _connectToDevice(_devicesList[index]),
+                            ),
+                          ),
+                  ),
+                const SizedBox(height: 80),
               ],
             ),
+          ),
+        ),
+      );
+}
+
+class _DeviceListItem extends StatelessWidget {
+  final DiscoveredDevice device;
+  final VoidCallback onConnect;
+
+  const _DeviceListItem({
+    required this.device,
+    required this.onConnect,
+  });
+
+  @override
+  Widget build(BuildContext context) => Card(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        child: ListTile(
+          title: Text(device.name.isEmpty ? "Unknown Device" : device.name),
+          subtitle: Text(device.id),
+          trailing: ElevatedButton(
+            onPressed: onConnect,
+            child: const Text("Connect"),
           ),
         ),
       );
@@ -168,251 +217,261 @@ class HomeScreen extends StatefulWidget {
   final String deviceId;
   final String deviceName;
 
-  const HomeScreen(
-      {super.key, required this.deviceId, required this.deviceName});
+  const HomeScreen({
+    super.key,
+    required this.deviceId,
+    required this.deviceName,
+  });
 
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String heartRate = "0";
-  String spo2 = "0";
-  String axisX = "0";
-  String axisY = "0";
-  String axisZ = "0";
-  String firmwareVersion = "v1.0.0";
-
   final _ble = FlutterReactiveBle();
+  final Map<String, String> _sensorValues = {
+    'heartRate': "0 bpm",
+    'spo2': "0%",
+    'axisX': "0",
+    'axisY': "0",
+    'axisZ': "0",
+  };
+  final String _firmwareVersion = "v1.0.0";
 
-  bool isUpdatingFirmware = false;
-  double updateProgress = 0.0;
-  String updateStatus = "";
+  bool _isUpdatingFirmware = false;
+  double _updateProgress = 0.0;
+  String _updateStatus = "";
 
-  // Define the UUIDs for the characteristics
-  late QualifiedCharacteristic spo2Characteristic;
-  late QualifiedCharacteristic axisXCharacteristic;
-  late QualifiedCharacteristic axisYCharacteristic;
-  late QualifiedCharacteristic axisZCharacteristic;
-  late QualifiedCharacteristic heartRateCharacteristic;
-
-  // Stream subscriptions for notifications
-  StreamSubscription? _connectionStream;
-  StreamSubscription? _spo2Subscription;
-  StreamSubscription? _axisXSubscription;
-  StreamSubscription? _axisYSubscription;
-  StreamSubscription? _axisZSubscription;
-  StreamSubscription? _heartRateSubscription;
-  StreamSubscription? _updateProgressSubscription;
-
+  late final Map<String, QualifiedCharacteristic> _characteristics;
+  final Map<String, StreamSubscription?> _subscriptions = {};
   DeviceConnectionState _deviceState = DeviceConnectionState.disconnected;
 
   @override
   void initState() {
     super.initState();
+    _initializeCharacteristics();
     _maintainConnection();
   }
 
-  void _maintainConnection() async {
-    _connectionStream = _ble
+  void _initializeCharacteristics() {
+    _characteristics = {
+      'heartRate': QualifiedCharacteristic(
+        characteristicId: BleUuids.heartRateUuid,
+        serviceId: BleUuids.heartRateServiceId,
+        deviceId: widget.deviceId,
+      ),
+      'spo2': QualifiedCharacteristic(
+        characteristicId: BleUuids.spo2Uuid,
+        serviceId: BleUuids.serviceId,
+        deviceId: widget.deviceId,
+      ),
+      'axisX': QualifiedCharacteristic(
+        characteristicId: BleUuids.axisXUuid,
+        serviceId: BleUuids.serviceId,
+        deviceId: widget.deviceId,
+      ),
+      'axisY': QualifiedCharacteristic(
+        characteristicId: BleUuids.axisYUuid,
+        serviceId: BleUuids.serviceId,
+        deviceId: widget.deviceId,
+      ),
+      'axisZ': QualifiedCharacteristic(
+        characteristicId: BleUuids.axisZUuid,
+        serviceId: BleUuids.serviceId,
+        deviceId: widget.deviceId,
+      ),
+    };
+  }
+
+  void _maintainConnection() {
+    _subscriptions['connection'] = _ble
         .connectToDevice(
       id: widget.deviceId,
       connectionTimeout: const Duration(seconds: 5),
     )
         .listen(
       (connectionState) {
-        if (connectionState.connectionState ==
-            DeviceConnectionState.connected) {
-          _deviceState = connectionState.connectionState;
-          _startNotifications();
-        } else {
-          _deviceState = connectionState.connectionState;
+        if (mounted) {
+          setState(() {
+            _deviceState = connectionState.connectionState;
+            if (_deviceState == DeviceConnectionState.connected) {
+              _startNotifications();
+            }
+          });
         }
-        setState(() {}); // Update UI based on connection state
-        print('Connection state: ${connectionState.connectionState}');
       },
-      onError: (Object error) {
-        print('Connection error: $error');
-      },
+      onError: (error) => debugPrint('Connection error: $error'),
     );
   }
 
   void _startNotifications() {
-    // Define the UUIDs for the characteristics
-    final heartRateUuid = Uuid.parse('00002a37-0000-1000-8000-00805f9b34fb');
-    final spo2Uuid = Uuid.parse('00001002-0000-1000-8000-00805f9b34fb');
-    final axisXUuid = Uuid.parse('00001003-0000-1000-8000-00805f9b34fb');
-    final axisYUuid = Uuid.parse('00001004-0000-1000-8000-00805f9b34fb');
-    final axisZUuid = Uuid.parse('00001005-0000-1000-8000-00805f9b34fb');
-
-    // Initialize the characteristics
-    spo2Characteristic = QualifiedCharacteristic(
-      characteristicId: spo2Uuid,
-      serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
-      deviceId: widget.deviceId,
-    );
-
-    axisXCharacteristic = QualifiedCharacteristic(
-      characteristicId: axisXUuid,
-      serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
-      deviceId: widget.deviceId,
-    );
-
-    axisYCharacteristic = QualifiedCharacteristic(
-      characteristicId: axisYUuid,
-      serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
-      deviceId: widget.deviceId,
-    );
-
-    axisZCharacteristic = QualifiedCharacteristic(
-      characteristicId: axisZUuid,
-      serviceId: Uuid.parse('00001000-0000-1000-8000-00805f9b34fb'),
-      deviceId: widget.deviceId,
-    );
-
-    heartRateCharacteristic = QualifiedCharacteristic(
-      characteristicId: heartRateUuid,
-      serviceId: Uuid.parse('0000180D-0000-1000-8000-00805f9b34fb'),
-      deviceId: widget.deviceId,
-    );
-
-    // Subscribe to Heart Rate characteristic notifications
-    _heartRateSubscription =
-        _ble.subscribeToCharacteristic(heartRateCharacteristic).listen(
+    // Heart rate
+    _subscriptions['heartRate'] =
+        _ble.subscribeToCharacteristic(_characteristics['heartRate']!).listen(
       (data) {
-        setState(() => heartRate = "${_parseHeartRate(data)} bpm");
+        if (mounted) {
+          setState(() =>
+              _sensorValues['heartRate'] = "${_parseHeartRate(data)} bpm");
+        }
       },
-      onError: (e) {
-        print('Error subscribing to Heart Rate characteristic: $e');
-      },
+      onError: (e) => debugPrint('Heart rate error: $e'),
     );
 
-    // Subscribe to notifications for each characteristic
-    _spo2Subscription =
-        _ble.subscribeToCharacteristic(spo2Characteristic).listen(
+    // SpO2
+    _subscriptions['spo2'] =
+        _ble.subscribeToCharacteristic(_characteristics['spo2']!).listen(
       (data) {
-        setState(() => spo2 = "${_parseSingleByteInt(data)}%");
+        if (mounted) {
+          setState(
+              () => _sensorValues['spo2'] = "${_parseSingleByteInt(data)}%");
+        }
       },
-      onError: (e) {
-        print('Error subscribing to SpO2 characteristic: $e');
-      },
+      onError: (e) => debugPrint('SpO2 error: $e'),
     );
 
-    _axisXSubscription =
-        _ble.subscribeToCharacteristic(axisXCharacteristic).listen(
-      (data) {
-        setState(() => axisX = _parseSignedInt16(data));
-      },
-      onError: (e) {
-        print('Error subscribing to axis X characteristic: $e');
-      },
-    );
+    // Axis data
+    _subscribeToAxisData('axisX');
+    _subscribeToAxisData('axisY');
+    _subscribeToAxisData('axisZ');
+  }
 
-    _axisYSubscription =
-        _ble.subscribeToCharacteristic(axisYCharacteristic).listen(
+  void _subscribeToAxisData(String axis) {
+    _subscriptions[axis] =
+        _ble.subscribeToCharacteristic(_characteristics[axis]!).listen(
       (data) {
-        setState(() => axisY = _parseSignedInt16(data));
+        if (mounted) {
+          setState(() => _sensorValues[axis] = _parseSignedInt16(data));
+        }
       },
-      onError: (e) {
-        print('Error subscribing to axis Y characteristic: $e');
-      },
-    );
-
-    _axisZSubscription =
-        _ble.subscribeToCharacteristic(axisZCharacteristic).listen(
-      (data) {
-        setState(() => axisZ = _parseSignedInt16(data));
-      },
-      onError: (e) {
-        print('Error subscribing to axis Z characteristic: $e');
-      },
+      onError: (e) => debugPrint('$axis error: $e'),
     );
   }
 
   Future<void> _performFirmwareUpdate() async {
+    if (_isUpdatingFirmware) return;
+
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      setState(() {
+        _isUpdatingFirmware = true;
+        _updateStatus = "Selecting firmware file...";
+      });
+
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['bin'],
       );
 
-      if (result != null) {
-        File file = File(result.files.single.path!);
-        Uint8List imageData = await file.readAsBytes();
-
-        // https://github.com/NordicSemiconductor/Flutter-nRF-Connect-Device-Manager?tab=readme-ov-file
-        // must be select xxxx.sign.bin file after unzip dfu_application.zip!
-        final managerFactory = FirmwareUpdateManagerFactory();
-        // `deviceId` is a String with the device's MAC address (on Android) or UUID (on iOS)
-        final updateManager = await managerFactory.getUpdateManager(widget.deviceId);
-        // call `setup` before using the manager
-        final updateStream = updateManager.setup();
-
-        updateManager.updateStateStream?.listen(
-          (event) {
-            if (event == FirmwareUpgradeState.success) {
-              print("Update Success");
-            } else {
-              print(event);
-            }
-          },
-          onDone: () async => {
-            await updateManager.kill(),
-          },
-          onError: (error) async => {
-            await updateManager.kill(),
-          },
-        );
-
-        updateManager.progressStream.listen((event) {
-          print("${event.bytesSent} / ${event.imageSize}} bytes sent");
+      if (result == null) {
+        setState(() {
+          _isUpdatingFirmware = false;
+          _updateStatus = "File selection cancelled";
         });
-
-        updateManager.logger.logMessageStream
-            .listen((log) {
-          print(log.message);
-        });
-
-        final configuration = const FirmwareUpgradeConfiguration(
-          estimatedSwapTime: Duration(seconds: 30),
-          byteAlignment: ImageUploadAlignment.fourByte,
-          eraseAppSettings: true,
-          pipelineDepth: 1,
-          firmwareUpgradeMode: FirmwareUpgradeMode.uploadOnly,
-        );
-
-        await updateManager.updateWithImageData(
-            imageData: imageData, configuration: configuration);
+        return;
       }
-    } catch (e) {
-      setState(() {
-        isUpdatingFirmware = false;
-        updateStatus = "Update failed: $e";
+
+      setState(() => _updateStatus = "Reading firmware file...");
+
+      final file = File(result.files.single.path!);
+      final imageData = await file.readAsBytes();
+
+      setState(() => _updateStatus = "Initializing update manager...");
+
+      final managerFactory = FirmwareUpdateManagerFactory();
+      final updateManager =
+          await managerFactory.getUpdateManager(widget.deviceId);
+      final updateStream = updateManager.setup();
+
+      updateManager.updateStateStream?.listen(
+        (event) {
+          setState(() => _updateStatus = "Update state: $event");
+
+          if (event == FirmwareUpgradeState.success) {
+            setState(() {
+              _isUpdatingFirmware = false;
+              _updateStatus = "Update successful";
+            });
+          }
+        },
+        onDone: () async {
+          await updateManager.kill();
+
+          if (mounted) {
+            setState(() {
+              _isUpdatingFirmware = false;
+              _updateStatus = "Update completed";
+            });
+
+            _showDialog("Firmware OTA", "The firmware update was successful.");
+          }
+        },
+        onError: (error) async {
+          await updateManager.kill();
+
+          if (mounted) {
+            setState(() {
+              _isUpdatingFirmware = false;
+              _updateStatus = "Update error: $error";
+            });
+
+            _showDialog("Firmware OTA", "The firmware update failed: $error");
+          }
+        },
+      );
+
+      updateManager.progressStream.listen((event) {
+        if (mounted) {
+          setState(() {
+            _updateProgress = event.bytesSent / event.imageSize;
+            _updateStatus =
+                "Uploading: ${event.bytesSent} / ${event.imageSize} bytes";
+          });
+        }
       });
+
+      updateManager.logger.logMessageStream
+          .listen((log) => debugPrint(log.message));
+
+      const configuration = FirmwareUpgradeConfiguration(
+        estimatedSwapTime: Duration(seconds: 30),
+        byteAlignment: ImageUploadAlignment.fourByte,
+        eraseAppSettings: true,
+        pipelineDepth: 1,
+        firmwareUpgradeMode: FirmwareUpgradeMode.uploadOnly,
+      );
+
+      setState(() => _updateStatus = "Starting firmware upload...");
+
+      await updateManager.updateWithImageData(
+        imageData: imageData,
+        configuration: configuration,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isUpdatingFirmware = false;
+          _updateStatus = "Update failed: $e";
+        });
+      }
+      debugPrint('Firmware update error: $e');
     }
   }
 
   String _parseHeartRate(List<int> data) {
     if (data.isEmpty) return "0";
 
-    int flags = data[0];
-    bool isHeartRate16Bit = (flags & 0x01) != 0;
+    final flags = data[0];
+    final isHeartRate16Bit = (flags & 0x01) != 0;
 
-    int heartRate;
     if (isHeartRate16Bit && data.length >= 3) {
-      heartRate = (data[2] << 8) | data[1];
+      return ((data[2] << 8) | data[1]).toString();
     } else if (!isHeartRate16Bit && data.length >= 2) {
-      heartRate = data[1];
-    } else {
-      return "Invalid Data";
+      return data[1].toString();
     }
-
-    return "$heartRate";
+    return "0";
   }
 
-  String _parseSingleByteInt(List<int> data) {
-    return data.isNotEmpty ? data[0].toString() : "0";
-  }
+  String _parseSingleByteInt(List<int> data) =>
+      data.isNotEmpty ? data[0].toString() : "0";
 
   String _parseSignedInt16(List<int> data) {
     if (data.length < 2) return "0";
@@ -421,15 +480,44 @@ class _HomeScreenState extends State<HomeScreen> {
         .toString();
   }
 
+  void _disconnectAndReturn() async {
+    for (final subscription in _subscriptions.values) {
+      await subscription?.cancel();
+    }
+
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const IntroScreen()),
+        (_) => false,
+      );
+    }
+  }
+
+  void _showDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(content),
+          actions: <Widget>[
+            TextButton(
+              child: Text('OK'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
-    _connectionStream?.cancel();
-    _spo2Subscription?.cancel();
-    _axisXSubscription?.cancel();
-    _axisYSubscription?.cancel();
-    _axisZSubscription?.cancel();
-    _heartRateSubscription?.cancel();
-    _updateProgressSubscription?.cancel();
+    for (final subscription in _subscriptions.values) {
+      subscription?.cancel();
+    }
     super.dispose();
   }
 
@@ -440,98 +528,108 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Spacer(flex: 1),
-                  IconButton(
-                    icon: Icon(Icons.bluetooth,
-                        color: _deviceState == DeviceConnectionState.connected
-                            ? Colors.blue
-                            : Colors.grey),
-                    onPressed: _disconnectAndReturn,
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.system_update,
-                        color: _deviceState == DeviceConnectionState.connected
-                            ? Colors.blue
-                            : Colors.grey),
-                    onPressed:
-                        isUpdatingFirmware ? null : _performFirmwareUpdate,
-                  ),
-                ],
-              ),
-              // Show update progress if updating
-              if (isUpdatingFirmware) ...[
-                Card(
-                  margin: const EdgeInsets.symmetric(vertical: 10),
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Firmware Update",
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold)),
-                        SizedBox(height: 16),
-                        Text(updateStatus),
-                        SizedBox(height: 8),
-                        LinearProgressIndicator(value: updateProgress),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              buildCard("BLE", [
-                buildText(
+              const SizedBox(height: 16),
+              _buildHeaderRow(),
+              if (_isUpdatingFirmware) _buildUpdateProgressCard(),
+              _buildInfoCard("BLE", [
+                _buildInfoRow(
                     "name",
                     widget.deviceName.isEmpty
                         ? "Unknown Device"
                         : widget.deviceName),
-                SizedBox(height: 8),
-                buildText("mac address", widget.deviceId),
-                SizedBox(height: 8),
-                buildText("firmware version", firmwareVersion),
+                const SizedBox(height: 8),
+                _buildInfoRow("mac address", widget.deviceId),
+                const SizedBox(height: 8),
+                _buildInfoRow("firmware version", _firmwareVersion),
               ]),
-              buildCard("PPG", [
-                buildTextWithIcon("HRM", heartRate, Icons.favorite),
-                SizedBox(height: 8),
-                buildTextWithIcon("SpO2", spo2, Icons.bloodtype),
-                SizedBox(height: 8),
-                buildTextWithIcon("R-R", "-", Icons.air),
+              _buildInfoCard("PPG", [
+                _buildIconRow(
+                    "HRM", _sensorValues['heartRate']!, Icons.favorite),
+                const SizedBox(height: 8),
+                _buildIconRow("SpO2", _sensorValues['spo2']!, Icons.bloodtype),
+                const SizedBox(height: 8),
+                _buildIconRow("R-R", "-", Icons.air),
               ]),
-              buildCard("ACC (Gyro)", [
-                buildAxisRow(
-                    ["X axis", "Y axis", "Z axis"], [axisX, axisY, axisZ]),
+              _buildInfoCard("ACC (Gyro)", [
+                _buildAxisRow(
+                  ["X axis", "Y axis", "Z axis"],
+                  [
+                    _sensorValues['axisX']!,
+                    _sensorValues['axisY']!,
+                    _sensorValues['axisZ']!
+                  ],
+                ),
               ]),
-              buildCard("ACC (Tap)", [
-                buildAxisRow(["Single", "Double", "Drop"], ["0", "0", "0"]),
+              _buildInfoCard("ACC (Tap)", [
+                _buildAxisRow(["Single", "Double", "Drop"], ["0", "0", "0"]),
               ]),
-              buildCard("Wearable Algorithm Suite", [
-                buildText("SDNN", "not supported this version."),
-                SizedBox(height: 8),
-                buildText("RDMII", "not supported this version."),
-                SizedBox(height: 8),
-                buildText("Stress", "not supported this version."),
-                SizedBox(height: 8),
-                buildText("Sleep Quality", "not supported this version."),
+              _buildInfoCard("Wearable Algorithm Suite", [
+                _buildInfoRow("SDNN", "not supported this version."),
+                const SizedBox(height: 8),
+                _buildInfoRow("RDMII", "not supported this version."),
+                const SizedBox(height: 8),
+                _buildInfoRow("Stress", "not supported this version."),
+                const SizedBox(height: 8),
+                _buildInfoRow("Sleep Quality", "not supported this version."),
               ]),
             ],
           ),
         ),
       );
 
-  Widget buildCard(String title, List<Widget> children) => Card(
+  Widget _buildHeaderRow() => Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          IconButton(
+            icon: Icon(
+              Icons.bluetooth,
+              color: _deviceState == DeviceConnectionState.connected
+                  ? Colors.blue
+                  : Colors.grey,
+            ),
+            onPressed: _disconnectAndReturn,
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.system_update,
+              color: _deviceState == DeviceConnectionState.connected
+                  ? Colors.blue
+                  : Colors.grey,
+            ),
+            onPressed: _deviceState == DeviceConnectionState.connected &&
+                    !_isUpdatingFirmware
+                ? _performFirmwareUpdate
+                : null,
+          ),
+        ],
+      );
+
+  Widget _buildUpdateProgressCard() => Card(
         margin: const EdgeInsets.symmetric(vertical: 10),
         elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Firmware Update",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text(_updateStatus),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(value: _updateProgress),
+            ],
+          ),
         ),
+      );
+
+  Widget _buildInfoCard(String title, List<Widget> children) => Card(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -539,75 +637,85 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Row(
                 children: [
-                  Text(title,
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Spacer(),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
                   IconButton(
-                      icon: Icon(Icons.settings, color: Colors.black),
-                      onPressed: () {}),
+                    icon: const Icon(Icons.settings, color: Colors.black),
+                    onPressed: () {},
+                  ),
                 ],
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               ...children,
             ],
           ),
         ),
       );
 
-  Widget buildText(String title, String value) => Row(
+  Widget _buildInfoRow(String title, String value) => Row(
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: TextStyle(fontSize: 16, color: Colors.black54)),
-              Text(value,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, color: Colors.black54),
+              ),
+              Text(
+                value,
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
-          Spacer(),
+          const Spacer(),
         ],
       );
 
-  Widget buildTextWithIcon(String title, String value, IconData icon) => Row(
+  Widget _buildIconRow(String title, String value, IconData icon) => Row(
         children: [
           Icon(icon, size: 40, color: Colors.red),
-          SizedBox(width: 20),
+          const SizedBox(width: 20),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: TextStyle(fontSize: 16, color: Colors.black54)),
-              Text(value,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, color: Colors.black54),
+              ),
+              Text(
+                value,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
         ],
       );
 
-  Widget buildAxisRow(List<String> axes, List<String> values) => Row(
+  Widget _buildAxisRow(List<String> axes, List<String> values) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: List.generate(axes.length, (i) {
-          return Column(
+        children: List.generate(
+          axes.length,
+          (i) => Column(
             children: [
-              Text(axes[i],
-                  style: TextStyle(fontSize: 16, color: Colors.black54)),
-              Text(values[i],
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                axes[i],
+                style: const TextStyle(fontSize: 16, color: Colors.black54),
+              ),
+              Text(
+                values[i],
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
-          );
-        }),
+          ),
+        ),
       );
-
-  void _disconnectAndReturn() async {
-    await _connectionStream?.cancel();
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => IntroScreen()),
-      (Route<dynamic> route) => false,
-    );
-  }
 }
