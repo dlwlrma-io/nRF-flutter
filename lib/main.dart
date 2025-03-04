@@ -296,6 +296,10 @@ class _HomeScreenState extends State<HomeScreen> {
             _deviceState = connectionState.connectionState;
             if (_deviceState == DeviceConnectionState.connected) {
               _startNotifications();
+
+              Future.delayed(const Duration(milliseconds: 500), () {
+                _setCurrentTime();
+              });
             }
           });
         }
@@ -453,6 +457,64 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
       debugPrint('Firmware update error: $e');
+    }
+  }
+
+  Future<void> _setCurrentTime() async {
+    try {
+      // Check if we're connected first
+      if (_deviceState != DeviceConnectionState.connected) {
+        debugPrint('Cannot set time: device not connected');
+        return;
+      }
+
+      debugPrint('Setting current time on device...');
+
+      // Current time characteristic
+      final characteristic = QualifiedCharacteristic(
+        serviceId: Uuid.parse('00001805-0000-1000-8000-00805f9b34fb'),
+        characteristicId: Uuid.parse('00002A2B-0000-1000-8000-00805f9b34fb'),
+        deviceId: widget.deviceId,
+      );
+
+      // Convert to bytes according to BLE Current Time format
+      // Format based on BLE specification for Current Time Service
+
+      // Fractions of a second (0-255 = 0-999ms)
+      // This field represents milliseconds, but mapped to a single byte (0-255)
+
+      // Reason for change
+      // 0 = No reason for change/manual user update
+      // 1 = External reference time update
+      // 2 = Change of time zone
+      // 3 = Change of DST (Daylight Saving Time)
+      // 4-254 = Reserved values
+      // 255 = Other reason
+
+      // Get current time
+      final now = DateTime.now();
+      final List<int> timeBytes = [
+        now.year & 0xFF,
+        (now.year >> 8) & 0xFF,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+        now.second,
+        now.weekday,
+        (now.millisecond * 256) ~/ 1000,
+        1,
+      ];
+
+      // Write time to the device
+      await _ble.writeCharacteristicWithResponse(
+        characteristic,
+        value: timeBytes,
+      );
+
+      debugPrint('Time set successfully: ${now.toString()}');
+    } catch (e) {
+      debugPrint('Error setting time: $e');
     }
   }
 
